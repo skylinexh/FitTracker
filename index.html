@@ -87,16 +87,19 @@
             </div>
         </div>
 
-        <!-- 2. SỐ ĐO VÒNG BỤNG (CHỈ 1 LẦN/NGÀY) -->
+        <!-- 2. SỐ ĐO VÒNG BỤNG -->
         <div class="waist-box">
             <label style="color: #0369a1; margin-top:0;">📏 Số Đo Vòng Bụng Trong Ngày (cm):</label>
             <input type="number" id="waistDay" step="0.5" placeholder="Ví dụ: 82.5" onblur="autoSaveField()">
         </div>
 
-        <!-- 3. LUYỆN TẬP -->
+        <!-- 3. LUYỆN TẬP (ĐÃ NÂNG CẤP HỖ TRỢ DÁN / CHỤP ẢNH GARMIN, MYFITNESSPAL) -->
         <div class="workout-box">
             <label style="color: #c2410c; margin-top:0;">🏋️ Luyện Tập & Hoạt Động Thể Thao:</label>
-            <textarea id="txtWorkout" placeholder="Chạy bộ 30p, Gym 45p, Đi bộ 5000 bước..." onblur="autoSaveField()"></textarea>
+            <textarea id="txtWorkout" placeholder="Nhập mô tả hoặc dán ảnh Garmin/MyFitnessPal trực tiếp..." onblur="autoSaveField()"></textarea>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgWorkout')">
+            <div class="paste-hint">Mẹo: Bạn có thể Paste (Ctrl+V) ảnh chụp Garmin Connect hoặc MyFitnessPal vào đây</div>
+            <img id="imgWorkout" class="img-preview">
         </div>
 
         <!-- 4. BỮA ĂN -->
@@ -142,7 +145,7 @@
     document.getElementById('sheetId').value = localStorage.getItem('GS_ID') || '';
     document.getElementById('apiKey').value = localStorage.getItem('GEMINI_KEY') || '';
 
-    let imagesData = { imgBreakfast: null, imgLunch: null, imgDinner: null };
+    let imagesData = { imgWorkout: null, imgBreakfast: null, imgLunch: null, imgDinner: null };
     let activeRowIndex = -1;
     let autoSaveTimer = null;
 
@@ -214,9 +217,6 @@
         activeRowIndex = -1;
 
         try {
-            // Cấu trúc 12 Cột chuẩn: 
-            // A: Date | B: wMorning | C: wAfterBfast | D: wAfterLunch | E: wAfterDinner | F: wEvening
-            // G: waistDay | H: Workout | I: Breakfast | J: Lunch | K: Dinner | L: AI_Analysis
             const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Sheet1!A:L?key=${apiKey}`;
             const res = await fetch(url);
             const data = await res.json();
@@ -387,19 +387,20 @@ Yêu cầu:
 Bạn là chuyên gia dinh dưỡng & HLV thể hình. Phân tích TOÀN BỘ dữ liệu ngày ${selectedDate}:
 - Cân nặng (5 mốc): Sáng=${document.getElementById('wMorning').value || '?'} | Sau Sáng=${document.getElementById('wAfterBfast').value || '?'} | Sau Trưa=${document.getElementById('wAfterLunch').value || '?'} | Sau Tối=${document.getElementById('wAfterDinner').value || '?'} | Tối trước ngủ=${document.getElementById('wEvening').value || '?'} (kg)
 - Số đo vòng bụng trong ngày: ${document.getElementById('waistDay').value || '?'} cm
-- Vận động: ${document.getElementById('txtWorkout').value || 'Không nhập'}
+- Vận động & Luyện tập: ${document.getElementById('txtWorkout').value || 'Không nhập text (xem ảnh nếu có)'}
 - Bữa Sáng: ${document.getElementById('txtBreakfast').value || 'Không nhập'}
 - Bữa Trưa: ${document.getElementById('txtLunch').value || 'Không nhập'}
 - Bữa Tối & Phụ: ${document.getElementById('txtDinner').value || 'Không nhập'}
 
 Yêu cầu phân tích:
-1. **Đánh giá Vòng Bụng & Cân Nặng:** Phân tích tương quan giữa số đo vòng bụng và sự biến động 5 mốc cân nặng trong ngày (xem có hiện tượng tích nước hay chướng bụng do thức ăn không).
-2. **Cân bằng Calo & Dinh Dưỡng:** Tổng kết Calo nạp vào vs Calo vận động ra.
+1. **Đánh giá Vòng Bụng & Cân NẶNG:** Phân tích tương quan giữa số đo vòng bụng và sự biến động 5 mốc cân nặng trong ngày.
+2. **Cân bằng Calo & Dinh Dưỡng (Calo In vs Calo Out):** Đọc kỹ các ảnh Garmin / MyFitnessPal / Bữa ăn đính kèm để ước lượng Calo tiêu hao từ vận động vs Calo nạp vào từ ăn uống.
 3. **Chiến lược điều chỉnh:** Đưa ra 2 hành động cụ thể cho ngày mai để siết vòng bụng và giữ cân nặng ổn định.
             `;
 
             const contents = [{ role: 'user', parts: [{ text: promptText }] }];
 
+            // Gửi toàn bộ ảnh bao gồm cả ảnh Luyện tập (Garmin/MyFitnessPal) và ảnh các bữa ăn
             Object.keys(imagesData).forEach(key => {
                 if (imagesData[key]) {
                     contents[0].parts.push({
