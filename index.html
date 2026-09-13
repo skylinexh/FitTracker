@@ -1,58 +1,496 @@
-function doPost(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Sheet1");
-    if (!sheet) {
-      sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0]; // Lấy tab đầu tiên nếu không có Sheet1
-    }
-    
-    var data = JSON.parse(e.postData.contents);
-    var rowData = data.values; // Mảng dữ liệu gửi lên
-    var selectedDate = rowData[0]; // Ngày (Cột A)
-    
-    var lastRow = sheet.getLastRow();
-    var rowIndex = -1;
-    
-    // Tìm xem ngày này đã có chưa (để Upsert - chống trùng dòng)
-    if (lastRow > 1) {
-      var dates = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < dates.length; i++) {
-        var d = dates[i][0];
-        if (d instanceof Date) {
-          d = Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
-        }
-        if (d.toString() === selectedDate.toString()) {
-          rowIndex = i + 2; // Tìm thấy vị trí dòng cũ
-          break;
-        }
-      }
-    }
-    
-    if (rowIndex !== -1) {
-      // ĐÃ CÓ NGÀY NÀY -> GHI ĐÈ HÀNG CŨ
-      sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
-    } else {
-      // CHƯA CÓ NGÀY NÀY -> THÊM DÒNG MỚI
-      sheet.appendRow(rowData);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({"status": "success"}))
-      .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({"status": "error", "message": err.toString()}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Fitness Tracker</title>
+    <style>
+        :root { --primary: #059669; --bg: #f3f4f6; --card: #ffffff; --text: #1f2937; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 15px; }
+        .container { max-width: 650px; margin: 0 auto; }
+        .card { background: var(--card); border-radius: 12px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: var(--primary); font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+        label { font-weight: 600; font-size: 0.85rem; display: block; margin: 10px 0 4px; color: #4b5563; }
+        input[type="text"], input[type="number"], textarea, input[type="date"] { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; font-size: 0.95rem; }
+        textarea { resize: vertical; height: 55px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        button { padding: 12px; border: none; border-radius: 8px; font-weight: bold; font-size: 0.95rem; cursor: pointer; transition: 0.2s; }
+        .btn-ai { background: #2563eb; color: white; }
+        .btn-sync { background: #4f46e5; color: white; width: 100%; margin-top: 5px; }
+        .btn-meal-ai { background: #7c3aed; color: white; width: 100%; margin-top: 6px; padding: 8px; font-size: 0.85rem; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .img-preview { max-width: 100%; max-height: 120px; border-radius: 6px; margin-top: 5px; display: none; border: 1px solid #e5e7eb; }
+        .config-box { background: #ecfdf5; border-left: 4px solid var(--primary); }
+        .status-tag { font-size: 0.75rem; padding: 3px 8px; border-radius: 12px; background: #e5e7eb; color: #374151; font-weight: normal; }
+        .status-syncing { background: #fef3c7; color: #92400e; }
+        .status-done { background: #d1fae5; color: #065f46; }
+        .ai-box { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 8px; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.5; margin-top: 10px; }
+        .workout-box { background: #fff7ed; border: 1px solid #ffedd5; padding: 12px; border-radius: 8px; margin-top: 10px; }
+        .waist-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px; border-radius: 8px; margin-top: 10px; }
+        .meal-section { border-top: 1px dashed #e5e7eb; padding-top: 10px; margin-top: 10px; }
+        .paste-hint { font-size: 0.75rem; color: #6b7280; margin-top: 2px; }
+        .chat-container { border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; padding: 10px; margin-top: 12px; }
+        .chat-history { max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+        .chat-msg { padding: 8px 12px; border-radius: 8px; font-size: 0.88rem; max-width: 85%; line-height: 1.4; }
+        .msg-user { background: #059669; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg-ai { background: #ffffff; color: #1f2937; align-self: flex-start; border: 1px solid #e5e7eb; border-bottom-left-radius: 2px; }
+        .chat-input-group { display: flex; gap: 6px; margin-top: 8px; }
+        .chat-input-group input { flex: 1; margin: 0; }
+        .chat-input-group button { width: auto; padding: 0 16px; margin: 0; background: #2563eb; color: white; }
+    </style>
+</head>
+<body>
 
-function doGet(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Sheet1");
-    if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    var data = sheet.getDataRange().getValues();
-    return ContentService.createTextOutput(JSON.stringify({"status": "success", "values": data}))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({"status": "error", "message": err.toString()}))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+<div class="container">
+    <!-- CẤU HÌNH APIS -->
+    <div class="card config-box">
+        <h2>Cấu Hình Hệ Thống <span id="syncStatus" class="status-tag">Chưa kết nối</span></h2>
+        <div class="grid-2">
+            <div>
+                <label>Apps Script Web App URL:</label>
+                <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+            <div>
+                <label>Gemini API Key:</label>
+                <input type="text" id="apiKey" placeholder="Nhập API Key">
+            </div>
+        </div>
+        <button class="btn-sync" onclick="saveConfigAndLoadToday()">Lưu Cấu Hình & Tải Dữ Liệu</button>
+    </div>
+
+    <!-- KHUNG NHẬP LIỆU -->
+    <div class="card">
+        <h2>
+            Nhật Ký Ngày 
+            <input type="date" id="selectDate" style="width: auto; padding: 4px 8px; font-size: 0.85rem;" onchange="loadDateData()">
+        </h2>
+        
+        <!-- CÂN NẶNG -->
+        <label>⚖️ Theo Dõi Cân NẶNG (kg):</label>
+        <div class="grid-2">
+            <div>
+                <label style="font-size:0.75rem; margin:2px 0;">Sáng ngủ dậy:</label>
+                <input type="number" id="wMorning" step="0.1" placeholder="75.2" onblur="autoSaveField()">
+            </div>
+            <div>
+                <label style="font-size:0.75rem; margin:2px 0;">Sau Bữa Sáng:</label>
+                <input type="number" id="wAfterBfast" step="0.1" placeholder="75.6" onblur="autoSaveField()">
+            </div>
+        </div>
+        <div class="grid-3" style="margin-top:5px;">
+            <div>
+                <label style="font-size:0.75rem; margin:2px 0;">Sau Bữa Trưa:</label>
+                <input type="number" id="wAfterLunch" step="0.1" placeholder="76.0" onblur="autoSaveField()">
+            </div>
+            <div>
+                <label style="font-size:0.75rem; margin:2px 0;">Sau Bữa Tối:</label>
+                <input type="number" id="wAfterDinner" step="0.1" placeholder="76.5" onblur="autoSaveField()">
+            </div>
+            <div>
+                <label style="font-size:0.75rem; margin:2px 0;">Tối trước ngủ:</label>
+                <input type="number" id="wEvening" step="0.1" placeholder="76.2" onblur="autoSaveField()">
+            </div>
+        </div>
+
+        <!-- VÒNG BỤNG -->
+        <div class="waist-box">
+            <label style="color: #0369a1; margin-top:0;">📏 Số Đo Vòng Bụng Trong Ngày (cm):</label>
+            <input type="number" id="waistDay" step="0.5" placeholder="Ví dụ: 82.5" onblur="autoSaveField()">
+        </div>
+
+        <!-- LUYỆN TẬP -->
+        <div class="workout-box">
+            <label style="color: #c2410c; margin-top:0;">🏋️ Luyện Tập & Hoạt Động Thể Thao:</label>
+            <textarea id="txtWorkout" placeholder="Nhập mô tả hoặc dán ảnh Garmin/MyFitnessPal..." onblur="autoSaveField()"></textarea>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgWorkout')">
+            <div class="paste-hint">Mẹo: Có thể Paste (Ctrl+V) ảnh Garmin Connect hoặc MyFitnessPal vào đây</div>
+            <img id="imgWorkout" class="img-preview">
+        </div>
+
+        <!-- BỮA ĂN -->
+        <div class="meal-section">
+            <label>🥣 Bữa Sáng:</label>
+            <textarea id="txtBreakfast" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgBreakfast')">
+            <img id="imgBreakfast" class="img-preview">
+            <button class="btn-meal-ai" onclick="analyzeMealInstant('Breakfast')">⚡ Nhận Xét Nhanh Bữa Sáng</button>
+        </div>
+
+        <div class="meal-section">
+            <label>🥗 Bữa Trưa:</label>
+            <textarea id="txtLunch" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgLunch')">
+            <img id="imgLunch" class="img-preview">
+            <button class="btn-meal-ai" onclick="analyzeMealInstant('Lunch')">⚡ Nhận Xét Nhanh Bữa Trưa</button>
+        </div>
+
+        <div class="meal-section">
+            <label>🥩 Bữa Tối & Ăn Phụ:</label>
+            <textarea id="txtDinner" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgDinner')">
+            <img id="imgDinner" class="img-preview">
+            <button class="btn-meal-ai" onclick="analyzeMealInstant('Dinner')">⚡ Nhận Xét Nhanh Bữa Tối</button>
+        </div>
+
+        <div style="margin-top: 15px;">
+            <button class="btn-ai" id="btnAI" style="width:100%" onclick="saveAndAnalyzeWithGemini()">📊 Phân Tích Đầy Đủ Cả Ngày (Gemini AI)</button>
+        </div>
+    </div>
+
+    <!-- KẾT QUẢ AI & CHAT -->
+    <div class="card">
+        <h2>Nhận Xét & Hỏi Đáp Với Gemini AI</h2>
+        <div id="aiResult" class="ai-box">Chưa có phân tích. Hãy nhập dữ liệu hoặc nhấn nút Nhận xét.</div>
+
+        <div class="chat-container">
+            <label style="margin-top:0; color:#2563eb;">💬 Trò Chuyện / Hỏi Thêm Gemini Về Ngày Hôm Nay:</label>
+            <div id="chatHistory" class="chat-history">
+                <div class="chat-msg msg-ai">Chào bạn! Bạn có thể hỏi thêm mình bất kỳ câu hỏi nào về chế độ ăn uống, vận động hôm nay.</div>
+            </div>
+            <div class="chat-input-group">
+                <input type="text" id="userChatInput" placeholder="Ví dụ: Chiều nay mình nên tập gì..." onkeypress="handleChatKeyPress(event)">
+                <button onclick="sendChatMessage()">Gửi</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('selectDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('scriptUrl').value = localStorage.getItem('APPS_SCRIPT_URL') || '';
+    document.getElementById('apiKey').value = localStorage.getItem('GEMINI_KEY') || '';
+
+    let imagesData = { imgWorkout: null, imgBreakfast: null, imgLunch: null, imgDinner: null };
+    let autoSaveTimer = null;
+    let chatConversation = [];
+
+    document.querySelectorAll('textarea').forEach(elem => {
+        elem.addEventListener('paste', function(e) {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    const blob = item.getAsFile();
+                    const reader = new FileReader();
+                    const targetImgId = this.id.replace('txt', 'img');
+                    if (document.getElementById(targetImgId)) {
+                        reader.onload = function(evt) {
+                            imagesData[targetImgId] = evt.target.result.split(',')[1];
+                            const imgElem = document.getElementById(targetImgId);
+                            imgElem.src = evt.target.result;
+                            imgElem.style.display = 'block';
+                            autoSaveField();
+                        };
+                        reader.readAsDataURL(blob);
+                    }
+                }
+            }
+        });
+    });
+
+    function updateStatus(text, type) {
+        const el = document.getElementById('syncStatus');
+        el.innerText = text;
+        el.className = 'status-tag ' + (type === 'done' ? 'status-done' : type === 'syncing' ? 'status-syncing' : '');
+    }
+
+    function saveConfigAndLoadToday() {
+        localStorage.setItem('APPS_SCRIPT_URL', document.getElementById('scriptUrl').value.trim());
+        localStorage.setItem('GEMINI_KEY', document.getElementById('apiKey').value.trim());
+        loadDateData();
+    }
+
+    function handleImage(event, elementId) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            imagesData[elementId] = e.target.result.split(',')[1];
+            const imgElem = document.getElementById(elementId);
+            imgElem.src = e.target.result;
+            imgElem.style.display = 'block';
+            autoSaveField();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function autoSaveField() {
+        updateStatus('Phát hiện thay đổi...', 'syncing');
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => {
+            writeToSheet();
+        }, 800);
+    }
+
+    async function loadDateData() {
+        const scriptUrl = localStorage.getItem('APPS_SCRIPT_URL');
+        const selectedDate = document.getElementById('selectDate').value;
+
+        if (!scriptUrl) return;
+        updateStatus('Đang kiểm tra...', 'syncing');
+
+        try {
+            const res = await fetch(scriptUrl);
+            const data = await res.json();
+
+            document.getElementById('wMorning').value = '';
+            document.getElementById('wAfterBfast').value = '';
+            document.getElementById('wAfterLunch').value = '';
+            document.getElementById('wAfterDinner').value = '';
+            document.getElementById('wEvening').value = '';
+            document.getElementById('waistDay').value = '';
+            document.getElementById('txtWorkout').value = '';
+            document.getElementById('txtBreakfast').value = '';
+            document.getElementById('txtLunch').value = '';
+            document.getElementById('txtDinner').value = '';
+            document.getElementById('aiResult').innerText = 'Chưa có phân tích cho ngày này.';
+
+            let found = false;
+            if (data.status === 'success' && data.values && data.values.length > 0) {
+                for (let i = 0; i < data.values.length; i++) {
+                    let d = data.values[i][0];
+                    if (d && d.toString().substr(0, 10) === selectedDate) {
+                        found = true;
+                        const row = data.values[i];
+                        document.getElementById('wMorning').value = row[1] || '';
+                        document.getElementById('wAfterBfast').value = row[2] || '';
+                        document.getElementById('wAfterLunch').value = row[3] || '';
+                        document.getElementById('wAfterDinner').value = row[4] || '';
+                        document.getElementById('wEvening').value = row[5] || '';
+                        document.getElementById('waistDay').value = row[6] || '';
+                        document.getElementById('txtWorkout').value = row[7] || '';
+                        document.getElementById('txtBreakfast').value = row[8] || '';
+                        document.getElementById('txtLunch').value = row[9] || '';
+                        document.getElementById('txtDinner').value = row[10] || '';
+                        if (row[11]) document.getElementById('aiResult').innerText = row[11];
+                        break;
+                    }
+                }
+            }
+
+            if (found) {
+                updateStatus(`Đã tải ngày ${selectedDate}`, 'done');
+            } else {
+                updateStatus(`Ngày mới (${selectedDate}) - Sẵn sàng`, 'done');
+            }
+        } catch (e) {
+            console.error(e);
+            updateStatus('Lỗi kết nối Sheet', '');
+        }
+    }
+
+    async function writeToSheet(aiAnalysisText = null) {
+        const scriptUrl = localStorage.getItem('APPS_SCRIPT_URL');
+        const selectedDate = document.getElementById('selectDate').value;
+
+        if (!scriptUrl) return;
+
+        const wMorning = document.getElementById('wMorning').value;
+        const wAfterBfast = document.getElementById('wAfterBfast').value;
+        const wAfterLunch = document.getElementById('wAfterLunch').value;
+        const wAfterDinner = document.getElementById('wAfterDinner').value;
+        const wEvening = document.getElementById('wEvening').value;
+        const waistDay = document.getElementById('waistDay').value;
+        const workout = document.getElementById('txtWorkout').value;
+        const breakfast = document.getElementById('txtBreakfast').value;
+        const lunch = document.getElementById('txtLunch').value;
+        const dinner = document.getElementById('txtDinner').value;
+        const currentAI = aiAnalysisText || document.getElementById('aiResult').innerText;
+
+        const rowData = [
+            selectedDate, wMorning, wAfterBfast, wAfterLunch, wAfterDinner, wEvening, 
+            waistDay, workout, breakfast, lunch, dinner, currentAI
+        ];
+
+        updateStatus('Đang lưu...', 'syncing');
+
+        try {
+            const res = await fetch(scriptUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ values: rowData })
+            });
+            const result = await res.json();
+            if (result.status === 'success') {
+                updateStatus('Đã tự động lưu!', 'done');
+            } else {
+                updateStatus('Lỗi khi lưu', '');
+            }
+        } catch (e) {
+            console.error(e);
+            updateStatus('Lỗi tự động lưu', '');
+        }
+    }
+
+    async function analyzeMealInstant(mealType) {
+        const apiKey = localStorage.getItem('GEMINI_KEY');
+        if (!apiKey) { alert('Chưa nhập Gemini API Key!'); return; }
+
+        const mealMap = { Breakfast: 'Bữa Sáng', Lunch: 'Bữa Trưa', Dinner: 'Bữa Tối' };
+        const txtValue = document.getElementById(`txt${mealType}`).value;
+        const imgKey = `img${mealType}`;
+
+        if (!txtValue && !imagesData[imgKey]) {
+            alert(`Vui lòng nhập nội dung hoặc đính kèm ảnh cho ${mealMap[mealType]}!`);
+            return;
+        }
+
+        document.getElementById('aiResult').innerText = `Gemini đang phân tích ${mealMap[mealType]}...`;
+
+        try {
+            const promptText = `
+Bạn là HLV Dinh Dưỡng. Phân tích NHANH TỨC THÌ bữa ăn vừa xong:
+- Tên bữa: ${mealMap[mealType]}
+- Mô tả: ${txtValue || 'Có đính kèm ảnh'}
+
+Yêu cầu:
+1. Ước lượng nhanh Calo & Tỷ lệ Protein/Carb/Fat của riêng bữa này.
+2. Cảnh báo ngay món dễ gây sưng/chướng bụng hoặc tích nước.
+3. Đưa ra 1 LỜI KHUYÊN ĐIỀU CHỈNH NGAY cho bữa ăn tiếp theo hoặc hoạt động buổi tiếp theo trong ngày.
+            `;
+
+            const contents = [{ role: 'user', parts: [{ text: promptText }] }];
+            if (imagesData[imgKey]) {
+                contents[0].parts.push({
+                    inline_data: { mime_type: "image/jpeg", data: imagesData[imgKey] }
+                });
+            }
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents })
+            });
+
+            const data = await res.json();
+            const aiText = `[ĐÁNH GIÁ TỨC THÌ - ${mealMap[mealType].toUpperCase()}]\n` + data.candidates[0].content.parts[0].text;
+            
+            document.getElementById('aiResult').innerText = aiText;
+            await writeToSheet(aiText);
+
+        } catch(e) {
+            alert('Lỗi Gemini: ' + e.message);
+        }
+    }
+
+    async function saveAndAnalyzeWithGemini() {
+        const apiKey = localStorage.getItem('GEMINI_KEY');
+        if (!apiKey) { alert('Chưa nhập Gemini API Key!'); return; }
+
+        const btn = document.getElementById('btnAI');
+        btn.disabled = true;
+        btn.innerText = "Gemini đang phân tích tổng thể...";
+
+        const selectedDate = document.getElementById('selectDate').value;
+
+        try {
+            const promptText = `
+Bạn là chuyên gia dinh dưỡng & HLV thể hình. Phân tích TOÀN BỘ dữ liệu ngày ${selectedDate}:
+- Cân nặng (5 mốc): Sáng=${document.getElementById('wMorning').value || '?'} | Sau Sáng=${document.getElementById('wAfterBfast').value || '?'} | Sau Trưa=${document.getElementById('wAfterLunch').value || '?'} | Sau Tối=${document.getElementById('wAfterDinner').value || '?'} | Tối trước ngủ=${document.getElementById('wEvening').value || '?'} (kg)
+- Số đo vòng bụng trong ngày: ${document.getElementById('waistDay').value || '?'} cm
+- Vận động & Luyện tập: ${document.getElementById('txtWorkout').value || 'Không nhập text'}
+- Bữa Sáng: ${document.getElementById('txtBreakfast').value || 'Không nhập'}
+- Bữa Trưa: ${document.getElementById('txtLunch').value || 'Không nhập'}
+- Bữa Tối & Phụ: ${document.getElementById('txtDinner').value || 'Không nhập'}
+
+Yêu cầu phân tích:
+1. **Đánh giá Vòng Bụng & Cân NẶNG:** Phân tích tương quan giữa số đo vòng bụng và sự biến động 5 mốc cân nặng.
+2. **Cân bằng Calo & Dinh Dưỡng:** Ước lượng Calo tiêu hao từ vận động vs Calo nạp vào từ ăn uống.
+3. **Chiến lược điều chỉnh:** Đưa ra 2 hành động cụ thể cho ngày mai.
+            `;
+
+            const contents = [{ role: 'user', parts: [{ text: promptText }] }];
+
+            Object.keys(imagesData).forEach(key => {
+                if (imagesData[key]) {
+                    contents[0].parts.push({
+                        inline_data: { mime_type: "image/jpeg", data: imagesData[key] }
+                    });
+                }
+            });
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents })
+            });
+
+            const data = await res.json();
+            const aiText = data.candidates[0].content.parts[0].text;
+
+            document.getElementById('aiResult').innerText = aiText;
+            await writeToSheet(aiText);
+
+            chatConversation = [
+                { role: 'user', parts: [{ text: "Dưới đây là dữ liệu nhật ký của tôi ngày hôm nay:\n" + promptText }] },
+                { role: 'model', parts: [{ text: aiText }] }
+            ];
+
+        } catch (e) {
+            console.error(e);
+            alert('Lỗi Gemini: ' + e.message);
+        }
+
+        btn.disabled = false;
+        btn.innerText = "📊 Phân Tích Đầy Đủ Cả Ngày (Gemini AI)";
+    }
+
+    function handleChatKeyPress(e) {
+        if (e.key === 'Enter') sendChatMessage();
+    }
+
+    async function sendChatMessage() {
+        const apiKey = localStorage.getItem('GEMINI_KEY');
+        const inputEl = document.getElementById('userChatInput');
+        const userText = inputEl.value.trim();
+
+        if (!userText) return;
+        if (!apiKey) { alert('Chưa nhập Gemini API Key!'); return; }
+
+        appendChatMessage(userText, 'user');
+        inputEl.value = '';
+
+        if (chatConversation.length === 0) {
+            const contextPrompt = `Dữ liệu ngày hiện tại: Cân sáng=${document.getElementById('wMorning').value}kg, Cân tối=${document.getElementById('wEvening').value}kg, Vòng bụng=${document.getElementById('waistDay').value}cm, Sáng=${document.getElementById('txtBreakfast').value}, Trưa=${document.getElementById('txtLunch').value}, Tối=${document.getElementById('txtDinner').value}, Tập=${document.getElementById('txtWorkout').value}.`;
+            chatConversation.push({ role: 'user', parts: [{ text: contextPrompt }] });
+        }
+
+        chatConversation.push({ role: 'user', parts: [{ text: userText }] });
+
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: chatConversation })
+            });
+
+            const data = await res.json();
+            const aiReply = data.candidates[0].content.parts[0].text;
+
+            chatConversation.push({ role: 'model', parts: [{ text: aiReply }] });
+            appendChatMessage(aiReply, 'ai');
+
+        } catch (e) {
+            appendChatMessage("Lỗi gửi tin nhắn: " + e.message, 'ai');
+        }
+    }
+
+    function appendChatMessage(text, sender) {
+        const historyEl = document.getElementById('chatHistory');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `chat-msg msg-${sender}`;
+        msgDiv.innerText = text;
+        historyEl.appendChild(msgDiv);
+        historyEl.scrollTop = historyEl.scrollHeight;
+    }
+
+    if (localStorage.getItem('APPS_SCRIPT_URL') && localStorage.getItem('GEMINI_KEY')) {
+        loadDateData();
+    }
+</script>
+
+</body>
+</html>
