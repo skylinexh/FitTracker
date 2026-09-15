@@ -12,7 +12,7 @@
         h2 { margin-top: 0; color: var(--primary); font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
         label { font-weight: 600; font-size: 0.85rem; display: block; margin: 10px 0 4px; color: #4b5563; }
         input[type="text"], input[type="number"], textarea, input[type="date"] { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; font-size: 0.95rem; }
-        textarea { resize: vertical; height: 55px; }
+        textarea { resize: vertical; height: 60px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
         button { padding: 12px; border: none; border-radius: 8px; font-weight: bold; font-size: 0.95rem; cursor: pointer; transition: 0.2s; }
@@ -103,8 +103,8 @@
         <div class="workout-box">
             <label style="color: #c2410c; margin-top:0;">🏋️ Luyện Tập & Hoạt Động Thể Thao:</label>
             <textarea id="txtWorkout" placeholder="Nhập mô tả hoặc dán ảnh Garmin/MyFitnessPal..." onblur="autoSaveField()"></textarea>
-            <input type="file" accept="image/*" onchange="handleImage(event, 'imgWorkout')">
-            <div class="paste-hint">Mẹo: Có thể Paste (Ctrl+V) ảnh Garmin Connect hoặc MyFitnessPal vào đây</div>
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgWorkout', 'txtWorkout')">
+            <div class="paste-hint">Mẹo: Paste (Ctrl+V) ảnh Garmin/MyFitnessPal -> AI tự đọc & điền văn bản để lưu Sheet</div>
             <img id="imgWorkout" class="img-preview">
         </div>
 
@@ -112,7 +112,7 @@
         <div class="meal-section">
             <label>🥣 Bữa Sáng:</label>
             <textarea id="txtBreakfast" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
-            <input type="file" accept="image/*" onchange="handleImage(event, 'imgBreakfast')">
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgBreakfast', 'txtBreakfast')">
             <img id="imgBreakfast" class="img-preview">
             <button class="btn-meal-ai" onclick="analyzeMealInstant('Breakfast')">⚡ Nhận Xét Nhanh Bữa Sáng</button>
         </div>
@@ -120,7 +120,7 @@
         <div class="meal-section">
             <label>🥗 Bữa Trưa:</label>
             <textarea id="txtLunch" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
-            <input type="file" accept="image/*" onchange="handleImage(event, 'imgLunch')">
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgLunch', 'txtLunch')">
             <img id="imgLunch" class="img-preview">
             <button class="btn-meal-ai" onclick="analyzeMealInstant('Lunch')">⚡ Nhận Xét Nhanh Bữa Trưa</button>
         </div>
@@ -128,7 +128,7 @@
         <div class="meal-section">
             <label>🥩 Bữa Tối & Ăn Phụ:</label>
             <textarea id="txtDinner" placeholder="Nhập thức ăn hoặc dán/chụp ảnh..." onblur="autoSaveField()"></textarea>
-            <input type="file" accept="image/*" onchange="handleImage(event, 'imgDinner')">
+            <input type="file" accept="image/*" onchange="handleImage(event, 'imgDinner', 'txtDinner')">
             <img id="imgDinner" class="img-preview">
             <button class="btn-meal-ai" onclick="analyzeMealInstant('Dinner')">⚡ Nhận Xét Nhanh Bữa Tối</button>
         </div>
@@ -165,6 +165,7 @@
     let autoSaveTimer = null;
     let chatConversation = [];
 
+    // XỬ LÝ PASTE ẢNH TỰ ĐỘNG ĐỌC BẰNG GEMINI
     document.querySelectorAll('textarea').forEach(elem => {
         elem.addEventListener('paste', function(e) {
             const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -173,13 +174,17 @@
                     const blob = item.getAsFile();
                     const reader = new FileReader();
                     const targetImgId = this.id.replace('txt', 'img');
+                    const targetTxtId = this.id;
                     if (document.getElementById(targetImgId)) {
                         reader.onload = function(evt) {
-                            imagesData[targetImgId] = evt.target.result.split(',')[1];
+                            const base64Data = evt.target.result.split(',')[1];
+                            imagesData[targetImgId] = base64Data;
                             const imgElem = document.getElementById(targetImgId);
                             imgElem.src = evt.target.result;
                             imgElem.style.display = 'block';
-                            autoSaveField();
+                            
+                            // Tự động dùng AI đọc ảnh và điền text
+                            parseImageToText(base64Data, targetTxtId);
                         };
                         reader.readAsDataURL(blob);
                     }
@@ -200,18 +205,66 @@
         loadDateData();
     }
 
-    function handleImage(event, elementId) {
+    function handleImage(event, imgElementId, txtElementId) {
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = function(e) {
-            imagesData[elementId] = e.target.result.split(',')[1];
-            const imgElem = document.getElementById(elementId);
+            const base64Data = e.target.result.split(',')[1];
+            imagesData[imgElementId] = base64Data;
+            const imgElem = document.getElementById(imgElementId);
             imgElem.src = e.target.result;
             imgElem.style.display = 'block';
-            autoSaveField();
+            
+            // Tự động dùng AI đọc ảnh và điền text
+            parseImageToText(base64Data, txtElementId);
         };
         reader.readAsDataURL(file);
+    }
+
+    // HÀM GỌI GEMINI ĐỌC ẢNH VÀ ĐỔI NỘI DUNG THÀNH TEXT TỰ ĐỘNG
+    async function parseImageToText(base64Data, txtElementId) {
+        const apiKey = localStorage.getItem('GEMINI_KEY');
+        if (!apiKey) return;
+
+        updateStatus('AI đang đọc ảnh...', 'syncing');
+        const txtBox = document.getElementById(txtElementId);
+        const originalVal = txtBox.value;
+
+        try {
+            let prompt = "";
+            if (txtElementId === 'txtWorkout') {
+                prompt = "Đọc hình ảnh Garmin Connect / MyFitnessPal / Luyện tập này và tóm tắt cực ngắn (dưới 15 từ): Loại bài tập, Thời gian tập, Calo tiêu hao (Calo Out). Chỉ trả về kết quả chữ ngắn gọn, không giải thích.";
+            } else {
+                prompt = "Đọc hình ảnh bữa ăn / MyFitnessPal này và tóm tắt ngắn gọn tên các món ăn và ước lượng calo nạp vào (Calo In). Chỉ trả về văn bản ngắn gọn, không giải thích.";
+            }
+
+            const contents = [{
+                role: 'user',
+                parts: [
+                    { text: prompt },
+                    { inline_data: { mime_type: "image/jpeg", data: base64Data } }
+                ]
+            }];
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents })
+            });
+
+            const data = await res.json();
+            const extractedText = data.candidates[0].content.parts[0].text.trim();
+
+            // Cập nhật text vào ô và tự động lưu lên Sheet
+            txtBox.value = originalVal ? (originalVal + " | [AI đọc ảnh: " + extractedText + "]") : ("[AI đọc ảnh: " + extractedText + "]");
+            autoSaveField();
+
+        } catch (e) {
+            console.error("Lỗi AI đọc ảnh: ", e);
+            autoSaveField();
+        }
     }
 
     function autoSaveField() {
