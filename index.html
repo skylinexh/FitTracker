@@ -66,7 +66,7 @@
             <input type="date" id="selectDate" style="width: auto; padding: 4px 8px; font-size: 0.85rem;" onchange="loadDateData()">
         </h2>
         
-        <!-- CÂN NẶNG -->
+        <!-- CÂN NẶNG 5 MỐC -->
         <label>⚖️ Theo Dõi Cân NẶNG (kg):</label>
         <div class="grid-2">
             <div>
@@ -138,7 +138,7 @@
         </div>
     </div>
 
-    <!-- KẾT QUẢ AI & CHAT -->
+    <!-- KẾT QUẢ AI & CHAT TIẾP NỐI -->
     <div class="card">
         <h2>Nhận Xét & Hỏi Đáp Với Gemini AI</h2>
         <div id="aiResult" class="ai-box">Chưa có phân tích. Hãy nhập dữ liệu hoặc nhấn nút Nhận xét.</div>
@@ -219,7 +219,7 @@
         clearTimeout(autoSaveTimer);
         autoSaveTimer = setTimeout(() => {
             writeToSheet();
-        }, 800);
+        }, 1000);
     }
 
     async function loadDateData() {
